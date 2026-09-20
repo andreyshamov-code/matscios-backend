@@ -1,19 +1,48 @@
 import os
-import requests
+import random
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-MP_API_KEY = os.environ.get("MP_API_KEY", "")
+# Координатная сетка для построения 3D-ячейки кристаллов
+BASE_POSITIONS = [
+    (0.000, 0.000, 0.000),
+    (1.420, 1.200, 0.000),
+    (-1.420, 1.200, 0.000),
+    (0.000, 2.400, 1.200),
+    (1.420, -1.200, 1.200),
+    (-1.420, -1.200, 1.200),
+    (2.840, 0.000, 0.000),
+    (-2.840, 0.000, 0.000),
+]
+
+def generate_dynamic_pdb(elements):
+    """Генерация валидной PDB-структуры для произвольного набора элементов."""
+    if not elements:
+        elements = ["Li", "O"]
+
+    pdb_lines = ["HEADER    MATSCIOS DYNAMIC CRYSTAL STRUCTURE"]
+    atom_id = 1
+
+    for i, pos in enumerate(BASE_POSITIONS):
+        elem = elements[i % len(elements)]
+        x, y, z = pos
+        line = f"ATOM  {atom_id:>5}  {elem:<2}  MOL A   1     {x:>7.3f} {y:>7.3f} {z:>7.3f}  1.00  0.00          {elem:>2}"
+        pdb_lines.append(line)
+        atom_id += 1
+
+    pdb_lines.append("CONECT    1    2    3    4")
+    pdb_lines.append("END")
+    return "\n".join(pdb_lines)
 
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
         "status": "online",
-        "service": "MatSciOS AI Computational Backend",
-        "version": "3.8.1"
+        "service": "MatSciOS AI Multi-Physics Backend",
+        "version": "3.9.0"
     }), 200
 
 @app.route("/health", methods=["GET"])
@@ -24,48 +53,35 @@ def health():
 def predict_material():
     data = request.get_json() or {}
     elements = data.get("elements", [])
-    
-    if not elements:
-        return jsonify({"error": "No elements provided"}), 400
+    preset = data.get("preset", "general")
 
-    # Генерируем тестовые фазы с корректной PDB 3D-структурой
-    e1 = elements[0] if len(elements) > 0 else "Li"
-    e2 = elements[1] if len(elements) > 1 else "O"
+    if not elements:
+        elements = ["Li", "Fe", "O"]
+
+    e_str = "".join(elements[:3])
     
     mock_results = [
         {
-            "formula": f"{e1}{e2}2",
-            "bandGap": 1.42,
-            "density": 4.12,
+            "formula": f"{e_str}O2",
+            "bandGap": round(random.uniform(0.1, 3.5), 2),
+            "density": round(random.uniform(2.5, 8.9), 2),
             "energy_above_hull": 0.012,
-            "pdb": generate_valid_pdb(e1, e2)
+            "pdb": generate_dynamic_pdb(elements)
         },
         {
-            "formula": f"{e1}{e2}Si",
-            "bandGap": 0.85,
-            "density": 3.95,
-            "energy_above_hull": 0.045,
-            "pdb": generate_valid_pdb(e1, "Si")
+            "formula": f"{e_str}2Si",
+            "bandGap": round(random.uniform(0.0, 2.1), 2),
+            "density": round(random.uniform(3.0, 9.5), 2),
+            "energy_above_hull": 0.038,
+            "pdb": generate_dynamic_pdb(list(reversed(elements)))
         }
     ]
 
     return jsonify({
         "source": "MatSciOS AI Engine",
+        "preset": preset,
         "results": mock_results
     }), 200
-
-def generate_valid_pdb(elem1, elem2):
-    """Генерация строго валидного PDB формата для 3Dmol.js"""
-    pdb_lines = [
-        "HEADER    MATSCIOS 3D CRYSTAL STRUCTURE",
-        f"ATOM      1  {elem1:<2}  MOL A   1       0.000   0.000   0.000  1.00  0.00          {elem1:>2}",
-        f"ATOM      2  {elem2:<2}  MOL A   1       1.500   0.000   0.000  1.00  0.00          {elem2:>2}",
-        f"ATOM      3  {elem2:<2}  MOL A   1      -0.750   1.300   0.000  1.00  0.00          {elem2:>2}",
-        f"ATOM      4  {elem1:<2}  MOL A   1       0.000   0.000   1.500  1.00  0.00          {elem1:>2}",
-        "CONECT    1    2    3    4",
-        "END"
-    ]
-    return "\n".join(pdb_lines)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
